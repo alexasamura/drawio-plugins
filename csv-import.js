@@ -1,86 +1,223 @@
 Draw.loadPlugin(function (ui) {
+    const buttonsMap = new Map([
+        ["Prefs", "openPrefsAction"],
+        ["Toggle Container", "toggleContainerAction"],
+        ["Layout", "applyLayoutAction"],
+        ["Import", "runImportAction"]
+    ]);
+
+    ui.actions.addAction('openPrefsAction', () => openPrefsAction(ui));
+    ui.actions.addAction('toggleContainerAction', () => {
+        let wd = loadingWindow();
+        setTimeout(async () => {
+            try {
+                toggleContainerAction(ui);
+            } finally {
+                wd.destroy();
+            }
+        }, 0);
+    });
+    ui.actions.addAction('applyLayoutAction', () => {
+        let wd = loadingWindow();
+        setTimeout(async () => {
+            try {
+                applyLayoutAction(ui);
+            } finally {
+                wd.destroy();
+            }
+        }, 0);
+    });
+    ui.actions.addAction('runImportAction', () => runImportAction(ui));
 
     let toolbar = ui.toolbar.container;
 
-    let btn = document.createElement('button');
-    btn.innerHTML = 'CSV';
-    btn.className = 'geBtn';
-    btn.style.margin = '0 5px';
-    toolbar.appendChild(btn);
-    btn.onclick = function () {
-        ui.actions.get('runPlugInCsvImport').funct();
-    }
-    ui.actions.addAction('runPlugInCsvImport', function () {
-        runPlugInCsvImport();
-    });
-
-    function runPlugInCsvImport() {
-        let input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.csv';
-
-        input.onchange = function (e) {
-            let file = e.target.files[0];
-            let reader = new FileReader();
-            reader.onload = function (e) {
-                let csvData = e.target.result;
-                // Step 3: Execute the import
-                importCsvToDiagram(ui, csvData);
-            };
-            reader.readAsText(file);
-        };
-        input.click();
+    for (const [key, value] of buttonsMap) {
+        console.log(`${key}: ${value}`);
+        let btn = document.createElement('button');
+        btn.className = 'geBtn';
+        btn.style.margin = '0 5px';
+        btn.innerHTML = key;
+        btn.onclick = function () {
+            ui.actions.get(value).funct();
+        }
+        toolbar.appendChild(btn);
     }
 
 });
 
-// function importCsvToDiagram(ui, csvData) {
-//     let graph = ui.editor.graph;
-//     let parent = graph.getDefaultParent();
+function loadingWindow() {
 
-//     // 1. Criar um gráfico invisível na memória para processar o CSV
-//     let tempGraph = new mxGraph();
-//     let tempEditor = new EditorUi(new Editor(false, tempGraph));
+    let div = document.createElement('div');
+    div.style.textAlign = 'center';
+    div.style.padding = '20px';
 
-//     // 2. Usar o motor do draw.io no gráfico temporário (ele vai ler o CSV e criar as setas lá)
-//     tempEditor.importCsv(csvData, function (cells) {
+    div.innerHTML = '<div class="geStatusAlert" style="cursor:default;padding:10px;">' +
+        '<img src="images/spin.gif" style="vertical-align:middle;margin-right:10px;"/>' +
+        '<span id="progresso-txt">Running...</span></div><br/>';
+    let wnd = new mxWindow('CSV Import Plugin', div, 300, 200, 220, 120, false, true);
+    wnd.setClosable(false);
+    wnd.setVisible(true);
+    let x = Math.max(0, (document.body.scrollWidth - wnd.table.clientWidth) / 2);
+    let y = Math.max(0, (document.documentElement.clientHeight - wnd.table.clientHeight) * 0.4);
+    wnd.setLocation(x, y);
 
-//         let model = graph.getModel();
-//         model.beginUpdate();
-//         try {
-//             // 3. Remover as setas antigas do seu gráfico original
-//             graph.removeCells(graph.getChildEdges(parent));
+    return wnd;
+}
 
-//             // 4. Mapear os blocos do gráfico original por ID
-//             let destVertices = graph.getChildVertices(parent);
-//             let idMap = {};
-//             destVertices.forEach(v => {
-//                 let id = v.getAttribute('id') || v.id;
-//                 idMap[id] = v;
-//             });
+function loadPrefs() {
+    let storageValue = localStorage.getItem('drawio_cvs_import_plugin_prefs');
+    let preferencias = storageValue ? JSON.parse(storageValue) : {
+        layoutsJson: [
+            {
+                layout: "mxHierarchicalLayout",
+                config: {
+                    orientation: "north",
+                    intraCellSpacing: 60,
+                    interRankCellSpacing: 80,
+                    fineTuning: true,
+                    straightening: true,
+                    fixRoots: false,
+                    disableEdgeStyle: false
+                }
+            },
+            {
+                layout: "mxParallelEdgeLayout",
+                config: {
+                    spacing: 30
+                }
+            }
+        ]
+    }
+    return preferencias;
+}
+function savePrefs(preferencias) {
+    localStorage.setItem('drawio_cvs_import_plugin_prefs', JSON.stringify(preferencias, null, 2));
+}
 
-//             // 5. Pegar as setas criadas no gráfico temporário e "mover" para o original
-//             let tempEdges = tempGraph.getChildEdges(tempGraph.getDefaultParent());
+function openPrefsAction(ui) {
+    let div = document.createElement('div');
+    div.innerHTML = '<h4>Preferências de Layout</h4>' +
+        '<textarea id="jsonConfig" rows="20" style="width:100%;"></textarea><br/>' +
+        '<button id="btnSalvar"class="geBtn">Salvar</button>';
 
-//             tempEdges.forEach(edge => {
-//                 let sourceId = edge.getTerminal(true).getAttribute('id') || edge.getTerminal(true).id;
-//                 let targetId = edge.getTerminal(false).getAttribute('id') || edge.getTerminal(false).id;
+    let textarea = div.querySelector('#jsonConfig');
+    let prefsAtuais = loadPrefs();
+    if (prefsAtuais) {
+        textarea.value = JSON.stringify(prefsAtuais.layoutsJson, null, 2);
+    }
 
-//                 // Se ambos os blocos existem no seu desenho original, cria a conexão
-//                 if (idMap[sourceId] && idMap[targetId]) {
-//                     graph.insertEdge(parent, null, edge.value, idMap[sourceId], idMap[targetId], edge.style);
-//                 }
-//             });
+    div.querySelector('#btnSalvar').onclick = function () {
+        prefsAtuais.layoutsJson = JSON.parse(textarea.value);
+        savePrefs(prefsAtuais);
+        ui.hideDialog();
+        ui.alert('Preferências salvas com sucesso!');
+    };
+    ui.showDialog(div, 600, 400, true, true);
+}
 
-//         } finally {
-//             model.endUpdate();
-//             // Limpar o editor temporário da memória
-//         }
+function toggleContainerAction(ui) {
+    let graph = ui.editor.graph;
+    let model = graph.getModel();
+    model.beginUpdate();
+    try {
+        let cells = graph.getSelectionCells();
+        for (const cell of cells) {
+            let style = cell.getStyle();
+            if (style?.includes('container')) {
+                let c = [];
+                let a = style.split(';');
+                for (const element of a)
+                    if (!element.includes('container='))
+                        c.push(element);
+                    else if (element.split('=')[1] === '0')
+                        c.push('container=1');
+                    else {
+                        c.push('container=0');
+                        graph.ungroupCells([cell]);
+                    }
+                model.setStyle(cell, c.join(";"));
+            }
+        }
+    } catch (e) {
+        console.log('toggleContainerAction error: ', e.message);
+        ui.alert('Erro ao executar Toggle Container: ' + e.message);
+    } finally {
+        model.endUpdate();
+    }
+}
+function applyLayoutAction(ui) {
+    let preferencias = loadPrefs();
+    let graph = ui.editor.graph;
+    let model = graph.model;
+    let celulasSelecionadas = graph.getEditableCells(graph.getSelectionCells());
+    model.beginUpdate();
+    try {
+        let layouts = graph.createLayouts(preferencias.layoutsJson);
+        let composite = new mxCompositeLayout(graph, layouts);
 
-//     });
-//     tempEditor.destroy();
-//     graph.refresh();
-// }
+        let camadaAtiva = graph.getDefaultParent();
+        let conexoes;
+        if (celulasSelecionadas && celulasSelecionadas.length > 0) {
+            let grupoTemporario = graph.createVertex(null, null, '', 0, 0, 0, 0);
+            graph.addCells([grupoTemporario], camadaAtiva);
+            graph.moveCells(celulasSelecionadas, 0, 0, false, grupoTemporario);
+            composite.execute(grupoTemporario);
+            let filhosDoGrupo = graph.getChildCells(grupoTemporario, true, true);
+            graph.moveCells(filhosDoGrupo, 0, 0, false, camadaAtiva);
+            graph.removeCells([grupoTemporario]);
+            graph.setSelectionCells(celulasSelecionadas);
+            conexoes = graph.getChildEdges(celulasSelecionadas);
+        } else {
+            composite.execute(camadaAtiva);
+            conexoes = graph.getChildEdges(camadaAtiva);
+        }
+
+        if (conexoes) {
+            for (const edge of conexoes) {
+                if (edge.geometry != null) {
+                    let geo = edge.geometry.clone();
+                    geo.points = null;
+                    model.setGeometry(edge, geo);
+                }
+            }
+        }
+
+    } catch (e) {
+        console.log('applyLayoutAction error: ', e.message);
+        ui.alert('Erro ao executar Layout: ' + e.message);
+    } finally {
+        model.endUpdate();
+    }
+}
+
+function runImportAction(ui) {
+    let graph = ui.editor.graph;
+    let model = graph.model;
+    let input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+
+    input.onchange = function (e) {
+        let file = e.target.files[0];
+        let reader = new FileReader();
+        reader.onload = function (e) {
+            let csvData = e.target.result;
+            // Step 3: Execute the import
+            let wd = loadingWindow();
+            setTimeout(async () => {
+                model.beginUpdate();
+                try {
+                    importCsvToDiagram(ui, csvData);
+                } finally {
+                    model.endUpdate();
+                    wd.destroy();
+                }
+            }, 0);
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
 
 function importCsvToDiagram(ui, csvData) {
     try {
@@ -112,16 +249,6 @@ function importCsvToDiagram(ui, csvData) {
             for (const cfg of config) {
                 executeConnnections(ui.editor.graph, headers, dataRows, cfg);
             }
-
-
-            let layout = new mxHierarchicalLayout(ui.editor.graph, mxConstants.DIRECTION_NORTH);
-            layout.intraCellSpacing = 40; // Espaço entre blocos na mesma camada
-            layout.interRankCellSpacing = 60; // Espaço entre camadas diferentes
-            layout.interHierarchySpacing = 40; // Espaço entre sub-árvores isoladas
-            /** let layout = new mxFastOrganicLayout(ui.editor.graph);
-            layout.forceConstant = 120; // Distância ideal entre os nós */
-            layout.execute(ui.editor.graph.getDefaultParent(), null, cells);
-            // Callback executed after shapes are created
             ui.editor.graph.setSelectionCells(cells);
             ui.editor.graph.scrollCellToVisible(cells[0]);
         });
@@ -147,10 +274,17 @@ function executeConnnections(graph, headers, dataRows, config) {
     graph.getModel().beginUpdate();
     try {
         dataRows.forEach(row => {
+
+            let c4Technology;
+            let c4Description;
+            let c4Type = "Relationship";
+            let sourceCell;
+            let targetCell;
             let sourceIds = row[fromIdx] ? row[fromIdx].toString().replaceAll('"', '').split(',').map(id => id.trim()) : [];
+
             for (const srcId of sourceIds) {
-                let sourceCell = cellMap[srcId];
-                let targetCell = cellMap[row[toIdx]];
+                sourceCell = cellMap[srcId];
+                targetCell = cellMap[row[toIdx]];
 
                 if (!sourceCell || !targetCell) return; // Proteção contra linhas vazias
 
@@ -159,31 +293,30 @@ function executeConnnections(graph, headers, dataRows, config) {
                     targetCell = cellMap[srcId];
                 }
 
-
-                let csvTech = "...";
-                let csvType = "Relationship";
-                let csvDesc = config.from;
-
                 if (sourceCell && targetCell) {
-                    let existingEdges = graph.getEdgesBetween(sourceCell, targetCell);
 
-                    let connectionExists = false;
-                    for (const edge of existingEdges) {
-                        // Checa se a origem real do edge é o nosso sourceCell
-                        if (edge.getTerminal(true) === sourceCell && edge.getTerminal(false) === targetCell) {
-                            if (edge.value != null && typeof edge.value === 'object') {
-                                let currentTech = edge.value.getAttribute('c4Technology');
-                                let currentType = edge.value.getAttribute('c4Type');
-                                let currentDesc = edge.value.getAttribute('c4Description');
+                    switch (config.from) {
+                        case "repositories":
+                            c4Description = "reads / writes";
+                            assingRepositoryRelation();
+                            break;
 
-                                // Compara se todos os atributos C4 batem com o que veio no CSV
-                                if (currentTech === csvTech && currentType === csvType && currentDesc === csvDesc) {
-                                    connectionExists = true;
-                                    break; // A conexão idêntica já existe, pula a criação
-                                }
-                            }
-                        }
+                        case "produces":
+                            c4Description = "produces";
+                            assingMessagingRelation();
+                            break;
+
+                        case "consumes":
+                            c4Description = "consumes";
+                            assingMessagingRelation();
+                            break;
+                        default:
+                            c4Description = "api call";
+                            assignServiceRelation();
+                            break;
                     }
+
+                    let connectionExists = checkExistingConnection();
                     if (!connectionExists) {
                         // Insere a nova conexão com estilo padrão
                         // graph.insertEdge(graph.getDefaultParent(), null, '', sourceCell, targetCell);
@@ -193,9 +326,9 @@ function executeConnnections(graph, headers, dataRows, config) {
                         // Injeta os metadados requeridos pela especificação C4 do draw.io
                         cellObject.setAttribute('placeholders', '1');
                         cellObject.setAttribute('label', config.label);
-                        cellObject.setAttribute('c4Technology', csvTech);
-                        cellObject.setAttribute('c4Type', csvType);
-                        cellObject.setAttribute('c4Description', csvDesc);
+                        cellObject.setAttribute('c4Technology', c4Technology);
+                        cellObject.setAttribute('c4Type', c4Type);
+                        cellObject.setAttribute('c4Description', c4Description);
 
                         // Insere a nova conexão encapsulando o objeto de dados C4
                         let newEdge = graph.insertEdge(graph.getDefaultParent(), null, cellObject, sourceCell, targetCell, config.style);
@@ -203,6 +336,61 @@ function executeConnnections(graph, headers, dataRows, config) {
                         // Garante que o draw.io processe a geometria do texto de forma correta
                         newEdge.geometry.relative = true;
                     }
+                }
+            }
+
+            function checkExistingConnection() {
+                let existingEdges = graph.getEdgesBetween(sourceCell, targetCell);
+                let connectionExists = false;
+                for (const edge of existingEdges) {
+                    // Checa se a origem real do edge é o nosso sourceCell
+                    if (edge.getTerminal(true) === sourceCell && edge.getTerminal(false) === targetCell) {
+
+                        if (edge.value != null && typeof edge.value === 'object') {
+
+                            let currentTech = edge.value.getAttribute('c4Technology');
+                            let currentType = edge.value.getAttribute('c4Type');
+                            let currentDesc = edge.value.getAttribute('c4Description');
+
+                            // Compara se todos os atributos C4 batem com o que veio no CSV
+                            if (currentTech === c4Technology && currentType === c4Type) {
+                                connectionExists = true;
+                                c4Description = currentDesc;
+                                break; // A conexão idêntica já existe, pula a criação
+                            }
+                        }
+                    }
+                }
+                return connectionExists;
+            }
+
+            function assignServiceRelation() {
+                if (targetCell.getAttribute('c4Description').toLowerCase().includes('webservice')) {
+                    c4Technology = "soap / https";
+                } else {
+                    c4Technology = "json / https";
+                }
+            }
+
+            function assingRepositoryRelation() {
+                switch (targetCell.getAttribute('c4Technology')) {
+                    case "NoSQL":
+                        c4Technology = "in-process / NoSqlConnManager";
+                        break;
+                    case "Bucket":
+                        c4Technology = "in-process / StorageManager";
+                        break;
+                    default:
+                        c4Technology = "in-process / SqlConnManager";
+                        break;
+                }
+            }
+
+            function assingMessagingRelation() {
+                if (targetCell.getAttribute('c4Technology') === "Queue") {
+                    c4Technology = "in-process / QueueConnManager";
+                } else {
+                    c4Technology = "in-process / TopicConnManager";
                 }
             }
         });
